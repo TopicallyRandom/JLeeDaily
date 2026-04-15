@@ -52,22 +52,54 @@ def fetch_post_content(url):
         print(f"Fetch error: {e}")
         return ""
 
-# ── Step 3: Generate post via Claude ──────────────────────────────────────────
-def generate_post(feed_context, today_str):
+# ── Step 3: Read past posts for self-referential context ─────────────────────
+def read_past_posts():
+    past = []
+    if not os.path.exists("posts"):
+        return past
+    files = sorted([f for f in os.listdir("posts") if f.endswith(".html")], reverse=True)
+    for fname in files[:10]:
+        try:
+            with open(f"posts/{fname}", "r") as f:
+                soup = BeautifulSoup(f.read(), "html.parser")
+                title = soup.find("h2")
+                body = soup.find("div", class_="post-body")
+                date = soup.find("div", class_="post-meta")
+                if title and body:
+                    past.append({
+                        "date": date.get_text(strip=True) if date else fname,
+                        "title": title.get_text(strip=True),
+                        "excerpt": body.get_text(separator=" ", strip=True)[:800]
+                    })
+        except Exception as e:
+            print(f"Could not read {fname}: {e}")
+    return past
+
+# ── Step 4: Generate post via Claude ──────────────────────────────────────────
+def generate_post(feed_context, today_str, past_posts):
     print("Generating post with Claude...")
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
-    prompt = f"""Today is {today_str}. You are writing a daily blog post for "The J Lee Daily" — a witty, editorial fan blog tracking JLee (Jason Lee, @carry_bradshaw_), Feed Me's semi-anonymous restaurant critic and host of the Expense Account podcast on Feed Me by Emily Sundberg.
+    past_context = ""
+    if past_posts:
+        past_context = "PAST POSTS FROM THIS BLOG (use these for self-referential callbacks, contradictions, running jokes, or continuity):\n\n"
+        for p in past_posts:
+            past_context += f"Date: {p['date']}\nTitle: {p['title']}\nExcerpt: {p['excerpt']}\n\n"
 
-Here is the latest content from Feed Me's archive:
+    prompt = f"""Today is {today_str}. You are writing a daily blog post for "The J Lee Daily" — an obsessive, witty, deeply earnest fan blog entirely devoted to JLee (Jason Lee, @carry_bradshaw_), Feed Me's semi-anonymous restaurant critic and host of the Expense Account podcast on Feed Me by Emily Sundberg.
+
+Here is the latest content from Feed Me's archive for context:
 {feed_context}
 
+{past_context}
+
 Write a blog post that:
-- Summarizes what's new on Feed Me today
-- Spends at least 4-5 paragraphs specifically on JLee — his writing style, his persona, his podcast, his takes, his cultural significance, random observations and opinions about him
-- Is witty, editorial, opinionated — like a sharp food media insider wrote it
+- Is PRIMARILY about JLee — his writing, his persona, his podcast, his cultural significance, his aesthetic, his takes, random spiraling thoughts and opinions about him. JLee is the main character. Always.
+- Mentions Feed Me news only briefly as a jumping-off point for more JLee thoughts
+- If past posts exist, occasionally reference them directly — agree with your past self, contradict your past self, notice patterns, reflect on how your understanding of JLee has evolved, make callbacks to things said before. The blog should feel like it is developing a relationship with its own archive. This self-referential quality should grow more pronounced over time.
+- Is witty, editorial, a little unhinged in its devotion — like someone who started a fan blog ironically and then accidentally became genuinely obsessed
 - Never uses bullet points, only flowing prose
-- Is around 600-800 words total
+- Is around 700-900 words total
 
 Return ONLY a JSON object with these exact fields, no markdown, no backticks:
 {{
@@ -200,9 +232,13 @@ def main():
         top_content = fetch_post_content(posts[0]["url"])
         feed_context = f"LATEST POST CONTENT:\n{top_content}\n\nOTHER RECENT TITLES:\n" + "\n".join([p["title"] for p in posts[1:]])
 
+    # Read past posts for self-referential context
+    past_posts = read_past_posts()
+    print(f"Found {len(past_posts)} past posts for context.")
+
     # Generate
     dispatch_num = count_posts()
-    post_data = generate_post(feed_context, today_str)
+    post_data = generate_post(feed_context, today_str, past_posts)
 
     # Write post file
     os.makedirs("posts", exist_ok=True)
