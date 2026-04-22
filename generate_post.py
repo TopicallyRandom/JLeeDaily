@@ -113,9 +113,12 @@ Return ONLY a JSON object with these exact fields, no markdown, no backticks:
         max_tokens=2000,
         messages=[{"role": "user", "content": prompt}]
     )
-
-    raw = message.content[0].text.strip()
+raw = message.content[0].text.strip()
     raw = raw.replace("```json", "").replace("```", "").strip()
+    # Find the first { and last } to extract just the JSON object
+    start = raw.find("{")
+    end = raw.rfind("}") + 1
+    raw = raw[start:end]
     return json.loads(raw)
 
 # ── Step 4: Build HTML files ──────────────────────────────────────────────────
